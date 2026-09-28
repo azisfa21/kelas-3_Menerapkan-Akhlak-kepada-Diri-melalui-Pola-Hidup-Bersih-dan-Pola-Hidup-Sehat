@@ -1,0 +1,799 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+// Komponen untuk menampung animasi CSS kustom
+const CustomStyles = () => (
+    <style dangerouslySetInnerHTML={{__html: `
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+            /* Background pemandangan: Langit biru ke rumput hijau */
+            background: linear-gradient(180deg, #93c5fd 0%, #e0f2fe 50%, #bbf7d0 50%, #4ade80 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+            margin: 0;
+            user-select: none;
+            overflow-x: hidden;
+        }
+        /* Efek Panel Kaca (Glassmorphism) */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.35);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+        }
+        /* Efek Teks 3D Putih */
+        .text-3d-white {
+            color: white;
+            text-shadow: 2px 2px 0px rgba(0,0,0,0.1), 0px 6px 12px rgba(0,0,0,0.15);
+        }
+        .bounce-hover { transition: transform 0.2s ease; }
+        .bounce-hover:hover { transform: translateY(-8px); }
+        .pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes popIn {
+            0% { opacity: 0; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .float-anim { animation: float 4s ease-in-out infinite; }
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-15px); }
+            100% { transform: translateY(0px); }
+        }
+        .pulse-slow { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        /* Class untuk menyembunyikan scrollbar pada container ikon horizontal */
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+    `}} />
+);
+
+// Hook kustom untuk efek suara menggunakan native Web Audio API
+const useSound = (enabled) => {
+    const audioCtx = useRef(null);
+
+    const init = () => {
+        if (!audioCtx.current) {
+            audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.current.state === 'suspended') {
+            audioCtx.current.resume();
+        }
+    };
+
+    const playTone = (freq, type, duration, vol, startTimeOffset) => {
+        if (!enabled) return;
+        try {
+            init();
+            const ctx = audioCtx.current;
+            const startTime = ctx.currentTime + startTimeOffset;
+            
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, startTime);
+            
+            gain.gain.setValueAtTime(vol, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+            
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            
+            osc.start(startTime);
+            osc.stop(startTime + duration);
+        } catch(e) {
+            console.error("Audio error:", e);
+        }
+    };
+
+    const playClick = () => playTone(523.25, 'sine', 0.1, 0.1, 0); // Nada C5 pendek
+    
+    const playCorrect = () => {
+        playTone(523.25, 'sine', 0.1, 0.1, 0);
+        playTone(659.25, 'sine', 0.1, 0.1, 0.1);
+        playTone(783.99, 'sine', 0.2, 0.1, 0.2);
+        playTone(1046.50, 'sine', 0.3, 0.1, 0.3); // Nada kemenangan
+    };
+    
+    const playWrong = () => {
+        playTone(349.23, 'triangle', 0.2, 0.1, 0); // F4
+        playTone(261.63, 'triangle', 0.3, 0.1, 0.2); // C4 turun
+    };
+
+    return { playClick, playCorrect, playWrong, init };
+};
+
+// Komponen Navigasi Bawah Global
+function BottomNav({ onHome, onBack, onNext, showNext = true, onFinish = null, sound }) {
+    return (
+        <div className="flex justify-between items-center mt-8 pt-6 border-t-4 border-white/50">
+            <div className="flex gap-2 md:gap-4">
+                <button onClick={() => { sound.playClick(); onHome(); }} className="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold py-2 px-3 md:py-3 md:px-6 rounded-2xl shadow-sm transition-colors border-2 border-blue-300 flex items-center gap-2 text-sm md:text-lg">
+                    🏠 Beranda
+                </button>
+                <button onClick={() => { sound.playClick(); onBack(); }} className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 font-bold py-2 px-3 md:py-3 md:px-6 rounded-2xl shadow-sm transition-colors border-2 border-yellow-300 flex items-center gap-2 text-sm md:text-lg">
+                    ↩️ Kembali
+                </button>
+            </div>
+            {onFinish ? (
+                <button onClick={() => { sound.playClick(); onFinish(); }} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 md:py-3 md:px-8 rounded-2xl shadow-md transition-transform hover:scale-105 border-4 border-white flex items-center gap-2 text-base md:text-xl pop-in">
+                    ✅ Selesai
+                </button>
+            ) : showNext ? (
+                <button onClick={() => { sound.playClick(); onNext(); }} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-6 md:py-3 md:px-8 rounded-2xl shadow-md transition-transform hover:scale-105 border-4 border-white flex items-center gap-2 text-base md:text-xl pop-in">
+                    Lanjut ➡️
+                </button>
+            ) : null}
+        </div>
+    );
+}
+
+// Layar Pembuka / Sampul
+function OpeningScreen({ onStart, sound }) {
+    const handleStart = () => {
+        sound.init(); // Wajib: Inisialisasi audio saat interaksi user pertama kali
+        sound.playClick();
+        onStart();
+    };
+
+    return (
+        <div className="flex flex-col items-center justify-center p-4 md:p-10 text-center min-h-[600px] pop-in relative z-10">
+            {/* Badge / Pill Atas */}
+            <div className="bg-gradient-to-b from-white to-blue-50 text-amber-700 px-8 md:px-12 py-2 md:py-3 rounded-full font-black text-xl md:text-2xl mb-6 border-b-[6px] border-b-[#93c5fd] shadow-lg flex items-center gap-2">
+                AYO BELAJAR PAI! ☀️
+            </div>
+            
+            {/* Judul Utama dengan Efek 3D */}
+            <h1 className="text-5xl md:text-7xl font-black text-3d-white mb-2 tracking-wider">BAB III</h1>
+            <h2 className="text-4xl md:text-5xl font-black text-3d-white mb-2 tracking-wide">Akhlak kepada Diri</h2>
+            <h3 className="text-2xl md:text-4xl font-bold text-3d-white mb-6 tracking-wide">Melalui Pola Hidup Bersih & Sehat</h3>
+
+            {/* Deretan Kartu Aktivitas 3D - Diubah menjadi 1 baris rata tengah */}
+            <div className="flex flex-nowrap justify-start md:justify-center gap-3 md:gap-4 mb-6 w-full max-w-[95%] overflow-x-auto pb-4 pt-2 hide-scrollbar">
+                {/* Cuci Tangan */}
+                <div className="bg-gradient-to-b from-[#e0f2fe] to-[#bae6fd] p-3 md:p-5 rounded-[20px] md:rounded-[30px] shadow-xl border-[4px] border-white/80 border-b-[8px] md:border-b-[10px] border-b-[#7dd3fc] flex flex-col items-center bounce-hover w-24 md:w-32 lg:w-40 flex-shrink-0 relative group">
+                    <div className="absolute -top-3 -left-3 opacity-0 group-hover:opacity-100 transition-opacity">✨</div>
+                    <span className="text-4xl md:text-6xl lg:text-7xl mb-2 drop-shadow-md">👐</span>
+                    <span className="text-xs md:text-sm lg:text-lg font-black text-[#0369a1] text-center leading-tight">Cuci Tangan</span>
+                </div>
+                {/* Gosok Gigi */}
+                <div className="bg-gradient-to-b from-[#fce7f3] to-[#fbcfe8] p-3 md:p-5 rounded-[20px] md:rounded-[30px] shadow-xl border-[4px] border-white/80 border-b-[8px] md:border-b-[10px] border-b-[#f9a8d4] flex flex-col items-center bounce-hover w-24 md:w-32 lg:w-40 flex-shrink-0 relative group">
+                    <div className="absolute -top-3 -right-3 opacity-0 group-hover:opacity-100 transition-opacity">✨</div>
+                    <span className="text-4xl md:text-6xl lg:text-7xl mb-2 drop-shadow-md">🪥</span>
+                    <span className="text-xs md:text-sm lg:text-lg font-black text-[#be185d] text-center leading-tight">Gosok Gigi</span>
+                </div>
+                {/* Buang Sampah */}
+                <div className="bg-gradient-to-b from-[#dcfce7] to-[#bbf7d0] p-3 md:p-5 rounded-[20px] md:rounded-[30px] shadow-xl border-[4px] border-white/80 border-b-[8px] md:border-b-[10px] border-b-[#86efac] flex flex-col items-center bounce-hover w-24 md:w-32 lg:w-40 flex-shrink-0 relative group">
+                    <span className="text-4xl md:text-6xl lg:text-7xl mb-2 drop-shadow-md">🗑️</span>
+                    <span className="text-xs md:text-sm lg:text-lg font-black text-[#15803d] text-center leading-tight">Buang Sampah</span>
+                </div>
+                {/* Makan Sehat */}
+                <div className="bg-gradient-to-b from-[#fef9c3] to-[#fef08a] p-3 md:p-5 rounded-[20px] md:rounded-[30px] shadow-xl border-[4px] border-white/80 border-b-[8px] md:border-b-[10px] border-b-[#fde047] flex flex-col items-center bounce-hover w-24 md:w-32 lg:w-40 flex-shrink-0 relative group">
+                    <span className="text-4xl md:text-6xl lg:text-7xl mb-2 drop-shadow-md">🥗</span>
+                    <span className="text-xs md:text-sm lg:text-lg font-black text-[#a16207] text-center leading-tight">Makan Sehat</span>
+                </div>
+                {/* Olahraga */}
+                <div className="bg-gradient-to-b from-[#ffedd5] to-[#fed7aa] p-3 md:p-5 rounded-[20px] md:rounded-[30px] shadow-xl border-[4px] border-white/80 border-b-[8px] md:border-b-[10px] border-b-[#fdba74] flex flex-col items-center bounce-hover w-24 md:w-32 lg:w-40 flex-shrink-0 relative group">
+                    <span className="text-4xl md:text-6xl lg:text-7xl mb-2 drop-shadow-md">🏃</span>
+                    <span className="text-xs md:text-sm lg:text-lg font-black text-[#c2410c] text-center leading-tight">Olahraga</span>
+                </div>
+            </div>
+
+            <button onClick={handleStart} className="group mt-2 bg-gradient-to-b from-[#4ade80] to-[#16a34a] text-white font-black text-xl md:text-3xl py-3 px-12 rounded-full shadow-2xl border-[4px] border-white/90 hover:scale-105 transition-transform flex items-center gap-3 border-b-[8px] border-b-[#14532d] active:border-b-[4px] active:translate-y-1">
+                <span className="group-hover:animate-pulse">▶️</span> MULAI BELAJAR
+            </button>
+        </div>
+    );
+}
+
+// Layar Menu Utama
+function MainMenuScreen({ onNavigate, soundEnabled, toggleSound, sound }) {
+    const [showHelp, setShowHelp] = useState(false);
+
+    const menuItems = [
+        { id: 'tujuan', title: 'TUJUAN BELAJAR', icon: '🎯', color: 'from-pink-400 to-rose-400', desc: 'Apa yang akan kita capai?' },
+        { id: 'materi', title: 'MATERI', icon: '📚', color: 'from-blue-400 to-indigo-400', desc: 'Yuk, baca dan pahami!' },
+        { id: 'game', title: 'GAME', icon: '🎮', color: 'from-yellow-400 to-orange-400', desc: 'Bermain sambil belajar' },
+        { id: 'evaluasi', title: 'EVALUASI', icon: '📝', color: 'from-green-400 to-emerald-400', desc: 'Uji pengetahuanmu' }
+    ];
+
+    return (
+        <div className="p-6 md:p-10 min-h-[600px] flex flex-col pop-in relative">
+            {/* Header Controls */}
+            <div className="flex flex-wrap justify-between items-center mb-8 gap-4">
+                <button onClick={() => { sound.playClick(); onNavigate('opening'); }} className="bg-white p-3 rounded-2xl shadow-sm border-2 border-gray-100 text-gray-600 hover:bg-gray-50 flex items-center gap-2 font-bold transition-colors">
+                    🏠 Beranda
+                </button>
+                <div className="flex gap-2 md:gap-3">
+                    <button onClick={() => { sound.playClick(); toggleSound(); }} className="bg-white p-3 rounded-2xl shadow-sm border-2 border-gray-100 text-gray-600 hover:bg-gray-50 font-bold transition-colors text-sm md:text-base">
+                        {soundEnabled ? '🔊 Suara ON' : '🔇 Suara OFF'}
+                    </button>
+                    <button onClick={() => { sound.playClick(); setShowHelp(!showHelp); }} className="bg-white p-3 rounded-2xl shadow-sm border-2 border-gray-100 text-gray-600 hover:bg-gray-50 font-bold transition-colors text-sm md:text-base">
+                        ℹ️ Petunjuk
+                    </button>
+                </div>
+            </div>
+
+            {/* Custom Modal Petunjuk (Pengganti alert) */}
+            {showHelp && (
+                <div className="bg-blue-50 border-4 border-blue-200 p-6 rounded-3xl mb-8 pop-in shadow-md relative mx-auto max-w-2xl w-full">
+                    <button onClick={() => setShowHelp(false)} className="absolute top-4 right-4 text-gray-400 hover:text-red-500 text-2xl font-bold bg-white rounded-full w-8 h-8 flex items-center justify-center leading-none">&times;</button>
+                    <h3 className="text-2xl font-black text-blue-700 mb-2">ℹ️ Petunjuk Belajar</h3>
+                    <p className="text-lg font-bold text-gray-700">Pilih menu di bawah ini untuk mulai belajar. Gunakan tombol navigasi di bagian bawah layar untuk berpindah halaman. Selamat belajar!</p>
+                </div>
+            )}
+
+            <div className="text-center mb-10">
+                <h2 className="text-4xl font-black text-teal-800 mb-2">MENU UTAMA</h2>
+                <p className="text-lg md:text-xl text-teal-600 font-bold bg-white/60 inline-block px-6 py-2 rounded-full">Pilih kegiatan belajarmu hari ini! 👦🏻👧🏻</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto w-full">
+                {menuItems.map(item => (
+                    <button 
+                        key={item.id}
+                        onClick={() => { sound.playClick(); onNavigate(item.id); }}
+                        className={`bg-gradient-to-br ${item.color} p-6 md:p-8 rounded-[30px] shadow-lg border-4 border-white text-white flex items-center gap-4 md:gap-6 hover:-translate-y-2 transition-all duration-300 text-left relative overflow-hidden`}
+                    >
+                        <div className="text-4xl md:text-6xl bg-white/20 p-4 rounded-2xl shadow-inner backdrop-blur-sm z-10 flex-shrink-0">
+                            {item.icon}
+                        </div>
+                        <div className="z-10">
+                            <h3 className="text-xl md:text-3xl font-black drop-shadow-md leading-tight mb-1">{item.title}</h3>
+                            <p className="text-white/90 font-semibold text-sm md:text-base">{item.desc}</p>
+                        </div>
+                        <div className="absolute -bottom-4 -right-4 text-8xl opacity-10 pointer-events-none">{item.icon}</div>
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function TujuanScreen({ onNavigate, sound }) {
+    return (
+        <div className="p-6 md:p-10 min-h-[600px] flex flex-col justify-between pop-in">
+            <div>
+                <div className="text-center mb-8">
+                    <span className="text-6xl mb-4 block float-anim">🎯</span>
+                    <h2 className="text-3xl md:text-4xl font-black text-pink-600">TUJUAN PEMBELAJARAN</h2>
+                </div>
+
+                <div className="bg-white rounded-[30px] p-6 md:p-10 shadow-xl border-4 border-pink-100 relative max-w-3xl mx-auto">
+                    <div className="absolute -top-10 -left-6 text-6xl drop-shadow-md hidden md:block">👦🏻</div>
+                    <div className="absolute -top-10 -right-6 text-6xl drop-shadow-md hidden md:block">👧🏻</div>
+
+                    <h3 className="text-xl md:text-2xl font-bold text-gray-700 mb-6 border-b-4 border-pink-100 pb-4 flex items-center gap-3">
+                        <span>📚</span> Setelah belajar, aku bisa:
+                    </h3>
+                    
+                    <ul className="space-y-4 text-base md:text-xl font-bold text-gray-600">
+                        <li className="flex items-center gap-4 bg-pink-50 p-4 rounded-xl border-2 border-pink-100 hover:scale-[1.02] transition-transform"><span className="text-2xl flex-shrink-0">✅</span> Menjelaskan akhlak kepada diri sendiri.</li>
+                        <li className="flex items-center gap-4 bg-blue-50 p-4 rounded-xl border-2 border-blue-100 hover:scale-[1.02] transition-transform"><span className="text-2xl flex-shrink-0">✅</span> Menjaga kebersihan tubuh dan lingkungan.</li>
+                        <li className="flex items-center gap-4 bg-green-50 p-4 rounded-xl border-2 border-green-100 hover:scale-[1.02] transition-transform"><span className="text-2xl flex-shrink-0">✅</span> Membiasakan hidup bersih.</li>
+                        <li className="flex items-center gap-4 bg-yellow-50 p-4 rounded-xl border-2 border-yellow-100 hover:scale-[1.02] transition-transform"><span className="text-2xl flex-shrink-0">✅</span> Membiasakan hidup sehat.</li>
+                        <li className="flex items-center gap-4 bg-purple-50 p-4 rounded-xl border-2 border-purple-100 hover:scale-[1.02] transition-transform"><span className="text-2xl flex-shrink-0">✅</span> Hidup disiplin dan bertanggung jawab.</li>
+                    </ul>
+
+                    <div className="mt-8 text-center bg-gradient-to-r from-pink-100 to-rose-100 p-6 rounded-2xl border-4 border-pink-200 shadow-inner">
+                        <p className="text-lg md:text-2xl font-extrabold text-pink-700 italic">
+                            "Aku anak muslim yang bersih, sehat, disiplin, dan bertanggung jawab!" 🌟
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <BottomNav 
+                onHome={() => onNavigate('main')} 
+                onBack={() => onNavigate('main')}
+                showNext={false}
+                onFinish={() => onNavigate('main')}
+                sound={sound}
+            />
+        </div>
+    );
+}
+
+function MateriScreen({ onNavigate, sound }) {
+    const [page, setPage] = useState(1);
+    const [quizAnswered, setQuizAnswered] = useState(false);
+    const [quizCorrect, setQuizCorrect] = useState(false);
+
+    const handleQuiz = (isCorrect) => {
+        setQuizAnswered(true);
+        setQuizCorrect(isCorrect);
+        if (isCorrect) {
+            sound.playCorrect();
+        } else {
+            sound.playWrong();
+        }
+    };
+
+    const renderPage1 = () => (
+        <div className="pop-in max-w-4xl mx-auto">
+            <h2 className="text-2xl md:text-3xl font-black text-blue-700 mb-6 flex items-center gap-3">
+                <span className="text-3xl md:text-4xl bg-blue-100 p-2 rounded-2xl flex-shrink-0">👦🏻</span> Apa Itu Akhlak kepada Diri Sendiri?
+            </h2>
+            
+            <div className="bg-white p-6 rounded-3xl shadow-md border-4 border-blue-100 mb-8 text-lg md:text-xl font-bold text-gray-700 leading-relaxed relative">
+                <span className="absolute top-4 right-4 text-4xl opacity-20 pointer-events-none">📖</span>
+                Akhlak kepada diri sendiri adalah <strong>sikap baik</strong> yang kita lakukan untuk menjaga dan menghargai diri kita sendiri yang merupakan pemberian Allah.
+            </div>
+
+            <h3 className="text-xl md:text-2xl font-black text-blue-600 mb-4 bg-blue-100 inline-block px-6 py-2 rounded-full">Contohnya:</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 mb-8">
+                {['Menjaga kebersihan tubuh 🧼', 'Menjaga kesehatan 🥗', 'Rajin belajar 📚', 'Makan sehat 🍎', 'Istirahat cukup 😴', 'Jaga diri dari hal buruk 🛡️'].map((txt, i) => (
+                    <div key={i} className="bg-gradient-to-b from-white to-blue-50 border-2 border-blue-200 p-3 md:p-4 rounded-2xl text-center font-bold text-blue-800 bounce-hover shadow-sm flex items-center justify-center min-h-[80px] text-sm md:text-base">
+                        {txt}
+                    </div>
+                ))}
+            </div>
+
+            <div className="bg-yellow-100 border-4 border-yellow-300 p-6 md:p-8 rounded-3xl shadow-inner relative mt-4">
+                <div className="absolute -top-6 right-4 text-5xl float-anim">🤔</div>
+                <h4 className="text-lg md:text-xl font-black text-yellow-800 mb-4 flex items-center gap-2"><span className="text-2xl">✨</span> Yuk, Jawab Pertanyaan Ini!</h4>
+                <p className="text-base md:text-xl font-bold text-gray-700 mb-6 bg-white p-4 rounded-xl border-2 border-yellow-200">
+                    "Apakah menjaga kebersihan tubuh termasuk akhlak kepada diri sendiri?"
+                </p>
+                
+                {!quizAnswered ? (
+                    <div className="flex flex-col sm:flex-row gap-4">
+                        <button onClick={() => handleQuiz(true)} className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-2xl shadow-md transition-transform hover:-translate-y-1 flex-1 text-lg md:text-xl border-b-4 border-green-700 flex justify-center items-center gap-2">
+                            🟢 Ya
+                        </button>
+                        <button onClick={() => handleQuiz(false)} className="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-8 rounded-2xl shadow-md transition-transform hover:-translate-y-1 flex-1 text-lg md:text-xl border-b-4 border-red-700 flex justify-center items-center gap-2">
+                            🔴 Tidak
+                        </button>
+                    </div>
+                ) : (
+                    <div className={`p-4 md:p-6 rounded-2xl text-center text-base md:text-lg font-bold border-4 pop-in ${quizCorrect ? 'bg-green-100 text-green-800 border-green-400' : 'bg-red-100 text-red-800 border-red-400'}`}>
+                        {quizCorrect 
+                            ? "🎉 Hebat! Jawabanmu benar! Menjaga kebersihan tubuh adalah wujud syukur dan sayang pada diri sendiri." 
+                            : "Ups, coba ingat lagi! Jawabannya adalah 'Ya', karena menjaga tubuh adalah bentuk akhlak yang baik untuk diri sendiri. 💡"}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+
+    const renderPage2 = () => (
+        <div className="pop-in max-w-4xl mx-auto">
+            <h2 className="text-2xl md:text-3xl font-black text-emerald-700 mb-6 flex items-center gap-3">
+                <span className="text-3xl md:text-4xl bg-emerald-100 p-2 rounded-2xl flex-shrink-0">🕌</span> Islam Mengajarkan Kebersihan
+            </h2>
+            
+            <div className="bg-white p-6 rounded-3xl shadow-md border-4 border-emerald-100 mb-8 text-lg md:text-xl font-bold text-gray-700 leading-relaxed flex flex-col md:flex-row items-center gap-6">
+                <div className="text-6xl md:text-7xl">💧</div>
+                <p>
+                    Islam mengajarkan kita untuk hidup bersih. Kebersihan membuat tubuh nyaman, sehat, dan terhindar dari penyakit. <br/><br/>
+                    <span className="bg-emerald-100 text-emerald-800 px-4 py-2 rounded-lg inline-block border-2 border-emerald-200 mt-2">
+                        ⭐ <strong>Kebersihan adalah sebagian dari iman!</strong> ⭐
+                    </span>
+                </p>
+            </div>
+
+            <h3 className="text-xl md:text-2xl font-black text-emerald-600 mb-4 bg-emerald-100 inline-block px-6 py-2 rounded-full">Contoh Menjaga Kebersihan:</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 mb-8">
+                {[
+                    { icon: '🚿', text: 'Mandi teratur' },
+                    { icon: '🪥', text: 'Menggosok gigi' },
+                    { icon: '👐', text: 'Mencuci tangan' },
+                    { icon: '👕', text: 'Pakaian bersih' },
+                    { icon: '✂️', text: 'Merawat kuku' },
+                    { icon: '🗑️', text: 'Buang sampah' }
+                ].map((item, idx) => (
+                    <div key={idx} className="bg-emerald-50 border-2 border-emerald-200 p-4 rounded-2xl flex flex-col items-center justify-center gap-3 bounce-hover shadow-sm min-h-[100px]">
+                        <span className="text-3xl md:text-4xl">{item.icon}</span>
+                        <span className="font-bold text-emerald-800 text-center text-sm md:text-base">{item.text}</span>
+                    </div>
+                ))}
+            </div>
+
+            <div className="mt-4 text-center bg-gradient-to-r from-emerald-100 to-green-200 p-6 rounded-3xl border-4 border-white shadow-lg relative overflow-hidden">
+                <div className="absolute -right-4 -bottom-4 text-6xl opacity-30 pointer-events-none">🌿</div>
+                <p className="text-xl md:text-3xl font-black text-emerald-800 z-10 relative drop-shadow-sm">
+                    "Anak muslim senang menjaga kebersihan." ✨
+                </p>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="p-6 md:p-10 min-h-[600px] flex flex-col justify-between">
+            <div className="mb-6 flex flex-wrap gap-4 justify-between items-center">
+                <span className="bg-blue-100 text-blue-800 font-bold px-4 md:px-6 py-2 rounded-full border-2 border-blue-300 shadow-sm flex items-center gap-2 text-sm md:text-base">
+                    📚 MATERI
+                </span>
+                <span className="bg-white text-gray-600 font-bold px-4 md:px-6 py-2 rounded-full border-2 border-gray-200 shadow-sm text-sm md:text-base">
+                    Halaman {page} / 2
+                </span>
+            </div>
+
+            {page === 1 ? renderPage1() : renderPage2()}
+
+            <BottomNav 
+                onHome={() => onNavigate('main')} 
+                onBack={() => { page === 1 ? onNavigate('main') : setPage(1) }}
+                onNext={() => setPage(2)}
+                showNext={page === 1}
+                onFinish={page === 2 ? () => onNavigate('main') : null}
+                sound={sound}
+            />
+        </div>
+    );
+}
+
+function GameScreen({ onNavigate, sound }) {
+    const [score, setScore] = useState(0);
+    const [message, setMessage] = useState("");
+    const [items, setItems] = useState(() => {
+        const initialItems = [
+            { id: 1, icon: '🍎', isHealthy: true, name: 'Apel' },
+            { id: 2, icon: '🍬', isHealthy: false, name: 'Permen' },
+            { id: 3, icon: '🧼', isHealthy: true, name: 'Sabun' },
+            { id: 4, icon: '🦠', isHealthy: false, name: 'Kuman' },
+            { id: 5, icon: '🪥', isHealthy: true, name: 'Sikat Gigi' },
+            { id: 6, icon: '🥤', isHealthy: false, name: 'Minuman Manis' },
+            { id: 7, icon: '🥗', isHealthy: true, name: 'Sayur' },
+            { id: 8, icon: '🏃', isHealthy: true, name: 'Olahraga' }
+        ];
+        return initialItems.sort(() => Math.random() - 0.5).map(i => ({...i, clicked: false}));
+    });
+
+    const maxScore = items.filter(i => i.isHealthy).length; // 5 items
+
+    const handleClick = (item) => {
+        if (item.clicked) return;
+        
+        const newItems = items.map(i => i.id === item.id ? { ...i, clicked: true } : i);
+        setItems(newItems);
+
+        if (item.isHealthy) {
+            sound.playCorrect();
+            setScore(s => s + 1);
+            setMessage(`Hebat! ${item.name} itu bagus! 🌟`);
+        } else {
+            sound.playWrong();
+            setMessage(`Oops! ${item.name} kurang baik. ❌`);
+        }
+    };
+
+    const isFinished = score === maxScore;
+
+    return (
+        <div className="p-6 md:p-10 min-h-[600px] flex flex-col justify-between pop-in">
+            <div className="max-w-3xl mx-auto w-full">
+                <div className="text-center mb-6">
+                    <h2 className="text-2xl md:text-4xl font-black text-orange-600 mb-3 flex items-center justify-center gap-3">
+                        🎮 GAME PILAH PILIH
+                    </h2>
+                    <p className="text-sm md:text-xl font-bold text-gray-700 bg-orange-100 inline-block px-4 md:px-6 py-2 md:py-3 rounded-full border-4 border-orange-300 shadow-sm">
+                        Klik benda atau kegiatan yang <span className="text-green-600 font-black">SEHAT & BERSIH</span>!
+                    </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row justify-between items-center bg-white p-4 rounded-3xl shadow-md border-4 border-gray-100 mb-8 gap-4">
+                    <div className="bg-orange-100 px-6 py-2 rounded-2xl border-2 border-orange-200">
+                        <span className="text-lg md:text-2xl font-bold text-gray-700">Skor: <span className="text-orange-600 font-black">{score} / {maxScore}</span></span>
+                    </div>
+                    <div className="h-10 flex items-center justify-center px-4 min-w-[200px] md:min-w-[250px]">
+                        <span className="text-base md:text-xl font-black text-blue-600 text-center">{message}</span>
+                    </div>
+                </div>
+
+                {isFinished ? (
+                    <div className="bg-green-100 border-4 border-green-400 p-8 md:p-12 rounded-[40px] text-center shadow-inner pop-in">
+                        <span className="text-6xl md:text-7xl mb-4 block float-anim">🏆</span>
+                        <h3 className="text-2xl md:text-4xl font-black text-green-700 mb-4">LUAR BIASA!</h3>
+                        <p className="text-lg md:text-xl font-bold text-gray-700 bg-white inline-block px-6 py-2 rounded-xl border-2 border-green-200">
+                            Kamu sudah tahu mana yang sehat dan bersih!
+                        </p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-4 gap-3 md:gap-6">
+                        {items.map(item => (
+                            <button 
+                                key={item.id}
+                                onClick={() => handleClick(item)}
+                                disabled={item.clicked}
+                                className={`aspect-square sm:h-24 md:h-32 text-4xl sm:text-5xl md:text-6xl rounded-2xl md:rounded-3xl flex items-center justify-center transition-all duration-300 shadow-md border-b-8 
+                                    ${item.clicked 
+                                        ? (item.isHealthy ? 'bg-green-100 border-green-300 opacity-60 scale-95' : 'bg-red-100 border-red-300 opacity-60 grayscale scale-95') 
+                                        : 'bg-white border-gray-200 hover:bg-gray-50 hover:-translate-y-2 active:translate-y-0 active:border-b-4'}`}
+                            >
+                                {item.icon}
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <BottomNav 
+                onHome={() => onNavigate('main')} 
+                onBack={() => onNavigate('main')}
+                showNext={false}
+                onFinish={isFinished ? () => onNavigate('main') : null}
+                sound={sound}
+            />
+        </div>
+    );
+}
+
+function EvaluasiScreen({ onNavigate, sound }) {
+    const [currentQ, setCurrentQ] = useState(0);
+    const [score, setScore] = useState(0);
+    const [finished, setFinished] = useState(false);
+    const [feedback, setFeedback] = useState(null);
+
+    const questions = [
+        {
+            q: "Tubuh kita adalah amanah dari Allah Swt, maka kita harus...",
+            options: ["Membiarkannya kotor", "Menjaganya tetap bersih & sehat", "Bermain lumpur tiap hari"],
+            answer: 1
+        },
+        {
+            q: "Manakah di bawah ini yang merupakan contoh akhlak kepada diri sendiri?",
+            options: ["Makan makanan sehat & bergizi", "Tidur larut malam", "Membuang sampah sembarangan"],
+            answer: 0
+        },
+        {
+            q: "Menurut ajaran Islam, menjaga kebersihan adalah sebagian dari...",
+            options: ["Kekayaan", "Hobi", "Iman"],
+            answer: 2
+        },
+        {
+            q: "Menggosok gigi secara rutin sebaiknya dilakukan...",
+            options: ["Sesudah makan dan sebelum tidur", "Hanya saat mau berpergian", "Satu kali saja dalam seminggu"],
+            answer: 0
+        },
+        {
+            q: "Rajin berolahraga dan beristirahat yang cukup adalah contoh dari...",
+            options: ["Pola hidup malas", "Pola hidup sehat", "Pola hidup kotor"],
+            answer: 1
+        },
+        {
+            q: "Jika melihat sampah berserakan di rumah, sikap anak muslim yang baik adalah...",
+            options: ["Membiarkannya saja", "Menunggu ibu membersihkan", "Segera membersihkan & membuangnya"],
+            answer: 2
+        },
+        {
+            q: "Menjaga kesehatan tubuh termasuk wujud rasa ... kita kepada Allah Swt.",
+            options: ["Marah", "Syukur", "Sedih"],
+            answer: 1
+        }
+    ];
+
+    const handleAnswer = (idx) => {
+        if (feedback !== null) return; // Prevent double click
+        const correct = idx === questions[currentQ].answer;
+        
+        if (correct) {
+            sound.playCorrect();
+            setScore(s => s + (100 / questions.length));
+            setFeedback('correct');
+        } else {
+            sound.playWrong();
+            setFeedback('wrong');
+        }
+
+        setTimeout(() => {
+            setFeedback(null);
+            if (currentQ < questions.length - 1) {
+                setCurrentQ(currentQ + 1);
+            } else {
+                setFinished(true);
+                if (correct) sound.playClick();
+            }
+        }, 1500);
+    };
+
+    return (
+        <div className="p-6 md:p-10 min-h-[600px] flex flex-col justify-between pop-in">
+            <div className="max-w-3xl mx-auto w-full">
+                <div className="text-center mb-8">
+                    <h2 className="text-2xl md:text-4xl font-black text-indigo-700 flex items-center justify-center gap-3">
+                        <span className="bg-indigo-100 p-2 rounded-2xl flex-shrink-0">📝</span> EVALUASI
+                    </h2>
+                </div>
+
+                {!finished ? (
+                    <div className="bg-white p-6 md:p-10 rounded-[30px] md:rounded-[40px] shadow-lg border-4 border-indigo-100 relative mt-6">
+                        <div className="absolute -top-5 md:-top-6 left-1/2 transform -translate-x-1/2 bg-indigo-500 text-white font-black py-1 px-4 md:py-2 md:px-6 rounded-full border-4 border-white shadow-md text-sm md:text-lg whitespace-nowrap">
+                            Soal {currentQ + 1} / {questions.length}
+                        </div>
+                        
+                        <h3 className="text-lg md:text-2xl font-black text-gray-800 mb-6 md:mb-8 mt-4 text-center leading-relaxed">
+                            {questions[currentQ].q}
+                        </h3>
+                        
+                        <div className="space-y-3 md:space-y-4">
+                            {questions[currentQ].options.map((opt, i) => (
+                                <button 
+                                    key={i}
+                                    onClick={() => handleAnswer(i)}
+                                    className={`w-full text-left p-3 md:p-5 rounded-2xl font-bold text-base md:text-xl border-4 transition-all shadow-sm flex items-center gap-3 md:gap-4 hover:-translate-y-1
+                                        ${feedback === null ? 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 text-gray-700' : 
+                                          feedback === 'correct' && i === questions[currentQ].answer ? 'bg-green-400 border-green-500 text-white translate-y-0' :
+                                          feedback === 'wrong' && i === questions[currentQ].answer ? 'bg-green-100 border-green-300 text-gray-600 translate-y-0' :
+                                          feedback === 'wrong' && i !== questions[currentQ].answer ? 'bg-red-400 border-red-500 text-white translate-y-0' : 'bg-gray-100 border-gray-200 text-gray-400 translate-y-0'}
+                                    `}
+                                >
+                                    <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white flex justify-center items-center text-indigo-600 font-black shadow-inner flex-shrink-0 text-sm md:text-base">
+                                        {['A', 'B', 'C'][i]}
+                                    </div>
+                                    {opt}
+                                </button>
+                            ))}
+                        </div>
+                        
+                        <div className="h-10 md:h-12 mt-6 flex items-center justify-center">
+                            {feedback === 'correct' && <div className="text-green-600 font-black text-lg md:text-2xl pop-in bg-green-100 px-6 py-2 rounded-full border-2 border-green-200">Benar! Hebat! 🎉</div>}
+                            {feedback === 'wrong' && <div className="text-red-600 font-black text-lg md:text-2xl pop-in bg-red-100 px-6 py-2 rounded-full border-2 border-red-200">Kurang tepat. Semangat! 💪</div>}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="bg-white p-8 md:p-12 rounded-[30px] md:rounded-[40px] shadow-lg border-4 border-indigo-100 text-center pop-in mt-6 relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-50 to-white opacity-50"></div>
+                        <span className="text-7xl md:text-8xl block mb-6 relative z-10 float-anim">{Math.round(score) > 70 ? '🌟' : '📚'}</span>
+                        <h3 className="text-2xl md:text-4xl font-black text-gray-800 mb-4 relative z-10">EVALUASI SELESAI</h3>
+                        <p className="text-lg md:text-2xl font-bold text-gray-600 mb-6 relative z-10">Nilai Kamu:</p>
+                        
+                        <div className="text-6xl md:text-7xl font-black text-indigo-600 mb-8 bg-indigo-50 inline-block px-10 py-4 md:px-12 md:py-6 rounded-[30px] md:rounded-[40px] border-4 md:border-8 border-indigo-200 shadow-inner relative z-10">
+                            {Math.round(score)}
+                        </div>
+                        
+                        <p className="text-base md:text-xl font-bold text-gray-700 relative z-10 bg-indigo-50/80 p-4 rounded-2xl border-2 border-indigo-100">
+                            {Math.round(score) === 100 
+                                ? "Alhamdulillah! Sempurna! Kamu anak yang pintar dan bersih." 
+                                : "Terus belajar dan biasakan hidup bersih & sehat ya!"}
+                        </p>
+                    </div>
+                )}
+            </div>
+
+            <BottomNav 
+                onHome={() => onNavigate('main')} 
+                onBack={() => onNavigate('main')}
+                showNext={false}
+                onFinish={finished ? () => onNavigate('main') : null}
+                sound={sound}
+            />
+        </div>
+    );
+}
+
+// Layar Memuat (Loading)
+function LoadingScreen() {
+    const [progress, setProgress] = useState(0);
+
+    useEffect(() => {
+        // Simulasi progres loading yang berjalan
+        const timer = setInterval(() => {
+            setProgress(p => {
+                // Menambah kemajuan secara acak untuk efek realistis
+                const next = p + Math.floor(Math.random() * 20) + 10;
+                return next > 100 ? 100 : next;
+            });
+        }, 300);
+        return () => clearInterval(timer);
+    }, []);
+
+    return (
+        <div className="flex flex-col items-center justify-center p-6 md:p-10 text-center min-h-[600px] pop-in">
+            <div className="flex gap-4 md:gap-6 mb-8 text-6xl md:text-8xl">
+                <span className="animate-bounce" style={{animationDelay: '0s'}}>🌿</span>
+                <span className="animate-bounce" style={{animationDelay: '0.2s'}}>📚</span>
+                <span className="animate-bounce" style={{animationDelay: '0.4s'}}>✨</span>
+            </div>
+            
+            <h2 className="text-3xl md:text-4xl font-black text-teal-700 mb-4 drop-shadow-sm pop-in">
+                Tunggu Sebentar Ya!
+            </h2>
+            <p className="text-lg md:text-xl font-bold text-teal-600 mb-10 bg-teal-50 px-6 py-2 rounded-full border-2 border-teal-100 shadow-sm">
+                Sedang menyiapkan keseruan belajarmu... 👦🏻👧🏻
+            </p>
+
+            <div className="w-64 md:w-80 h-8 bg-gray-100 rounded-full border-4 border-teal-200 overflow-hidden shadow-inner relative">
+                <div 
+                    className="h-full bg-gradient-to-r from-teal-400 to-emerald-500 transition-all duration-300 ease-out flex items-center justify-end pr-3"
+                    style={{ width: `${progress}%` }}
+                >
+                    <span className="text-xs md:text-sm text-white font-black drop-shadow-md">{progress}%</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// Komponen Utama Aplikasi
+export default function App() {
+    const [isLoading, setIsLoading] = useState(true);
+    const [screen, setScreen] = useState('opening');
+    const [soundEnabled, setSoundEnabled] = useState(true);
+    
+    // Inisialisasi custom hook untuk sound
+    const sound = useSound(soundEnabled);
+
+    // Mengatur waktu untuk halaman loading menghilang otomatis
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsLoading(false);
+        }, 2500); // Loading akan tampil selama 2,5 detik
+        
+        return () => clearTimeout(timer);
+    }, []);
+
+    const goTo = (newScreen) => {
+        setScreen(newScreen);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const toggleSound = () => {
+        setSoundEnabled(!soundEnabled);
+    };
+
+    const startApp = () => {
+        setScreen('main');
+    };
+
+    // Router Sederhana
+    let currentView = null;
+    
+    if (isLoading) {
+        currentView = <LoadingScreen />;
+    } else {
+        switch(screen) {
+            case 'opening': currentView = <OpeningScreen onStart={startApp} sound={sound} />; break;
+            case 'main': currentView = <MainMenuScreen onNavigate={goTo} soundEnabled={soundEnabled} toggleSound={toggleSound} sound={sound} />; break;
+            case 'tujuan': currentView = <TujuanScreen onNavigate={goTo} sound={sound} />; break;
+            case 'materi': currentView = <MateriScreen onNavigate={goTo} sound={sound} />; break;
+            case 'game': currentView = <GameScreen onNavigate={goTo} sound={sound} />; break;
+            case 'evaluasi': currentView = <EvaluasiScreen onNavigate={goTo} sound={sound} />; break;
+            default: currentView = <OpeningScreen onStart={startApp} sound={sound} />;
+        }
+    }
+
+    return (
+        <>
+            <CustomStyles />
+            
+            {/* Dekorasi Latar Belakang Alam 3D */}
+            <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 flex flex-col justify-between">
+                {/* Awan dan Bintang */}
+                <div className="w-full h-1/2 relative">
+                    <div className="absolute top-10 left-10 text-6xl md:text-8xl opacity-80 float-anim">☁️</div>
+                    <div className="absolute top-5 right-20 text-5xl md:text-7xl opacity-80 float-anim" style={{animationDelay: '1s'}}>☁️</div>
+                    <div className="absolute top-32 left-1/4 text-4xl md:text-6xl opacity-70 float-anim" style={{animationDelay: '2s'}}>☁️</div>
+                    <div className="absolute top-16 left-1/3 text-3xl md:text-5xl text-yellow-300 animate-pulse">⭐</div>
+                    <div className="absolute top-28 right-1/4 text-2xl md:text-4xl text-yellow-300 animate-bounce">⭐</div>
+                </div>
+                {/* Pohon dan Semak di Garis Cakrawala */}
+                <div className="w-full absolute top-[45%] md:top-[48%] flex justify-between px-4 md:px-10 z-0">
+                    <div className="text-8xl md:text-9xl -ml-10 md:ml-0 filter drop-shadow-lg">🌳</div>
+                    <div className="text-6xl md:text-8xl mt-10 filter drop-shadow-lg hidden md:block">🌲</div>
+                    <div className="text-6xl md:text-8xl mt-8 filter drop-shadow-lg hidden md:block">🌲</div>
+                    <div className="text-8xl md:text-9xl -mr-10 md:mr-0 filter drop-shadow-lg">🌳</div>
+                </div>
+            </div>
+
+            {/* Container Aplikasi */}
+            <div className="w-full min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 md:p-8 relative z-10 mt-10 md:mt-0">
+                <div className="w-full max-w-5xl glass-panel rounded-[40px] md:rounded-[50px] shadow-2xl overflow-hidden relative">
+                    {currentView}
+                </div>
+
+                {}
+                <div className="mt-4 text-white font-bold text-xs md:text-sm drop-shadow-md tracking-wide bg-black/10 px-4 py-2 rounded-full backdrop-blur-sm border border-white/20 text-center relative z-10">
+                    Dibuat oleh Azis Fatoni, S.Pd.I
+                </div>
+            </div>
+        </>
+    );
+}
